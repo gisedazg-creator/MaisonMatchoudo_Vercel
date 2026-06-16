@@ -346,6 +346,7 @@ export default function MaisonMatchoudo() {
   }
 
   // ─── Data fetching ────────────────────────────
+  const [lastSync, setLastSync] = useState<Date | null>(null)
   const loadData = useCallback(async () => {
     if (!user) return
     setDataLoading(true)
@@ -359,6 +360,7 @@ export default function MaisonMatchoudo() {
       if (txRes.ok) setTransactions(await txRes.json())
       if (facRes.ok) setFactures(await facRes.json())
       if (memRes.ok) setMembers(await memRes.json())
+      setLastSync(new Date())
     } catch { /* ignore */ }
     setDataLoading(false)
   }, [user])
@@ -376,6 +378,33 @@ export default function MaisonMatchoudo() {
       })
     }
   }, [user?.id, loadData])
+
+  // ─── Auto-refresh: polling + window focus ─────
+  useEffect(() => {
+    if (!user || showMemberSelect) return
+
+    // Poll every 15 seconds (only when tab is visible)
+    const pollInterval = setInterval(() => {
+      if (!document.hidden) {
+        loadData()
+      }
+    }, 15000)
+
+    // Refresh on window focus (user comes back to tab)
+    const handleFocus = () => loadData()
+    const handleVisibility = () => {
+      if (!document.hidden) loadData()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      clearInterval(pollInterval)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [user, showMemberSelect, loadData])
 
   const handleMemberSelect = async (member: Member) => {
     // Check if member is already claimed by another account
@@ -1765,6 +1794,35 @@ export default function MaisonMatchoudo() {
       >
         <LogOut className="w-4 h-4 mr-2" /> Déconnexion
       </Button>
+
+      {/* Delete Account */}
+      <div className="mt-4 pt-4 border-t border-destructive/10">
+        <Button
+          variant="outline"
+          className="w-full border-destructive/20 text-destructive/70 hover:bg-destructive/10 hover:text-destructive text-xs"
+          onClick={async () => {
+            if (!confirm('⚠️ Supprimer votre compte ? Toutes vos données (transactions, factures, membres) seront définitivement effacées.')) return
+            if (!confirm('Êtes-vous vraiment sûr ? Cette action est irréversible.')) return
+            try {
+              const res = await fetch('/api/auth/delete-account', {
+                method: 'DELETE',
+                headers: getAuthHeaders(),
+              })
+              if (res.ok) {
+                showToast('Compte supprimé', '#0F6E56')
+                handleLogout()
+              } else {
+                const data = await res.json()
+                showToast(data.error || 'Erreur lors de la suppression', '#A32D2D')
+              }
+            } catch {
+              showToast('Erreur de connexion', '#A32D2D')
+            }
+          }}
+        >
+          <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Supprimer mon compte
+        </Button>
+      </div>
     </div>
   )
 
@@ -1787,9 +1845,10 @@ export default function MaisonMatchoudo() {
           <button
             className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/10 text-[10px] font-medium hover:bg-white/20 transition-colors"
             onClick={loadData}
+            title={lastSync ? `Dernière sync: ${lastSync.toLocaleTimeString('fr-FR')}` : 'Cliquer pour synchroniser'}
           >
             <div className={`w-1.5 h-1.5 rounded-full ${dataLoading ? 'bg-m-gold animate-pulse' : 'bg-emerald-400'}`} />
-            {dataLoading ? 'Sync…' : 'En ligne'}
+            {dataLoading ? 'Sync…' : lastSync ? `Sync ${lastSync.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'En ligne'}
           </button>
           <div className="flex items-center gap-1.5 bg-white/10 rounded-full px-2 py-1 ring-1 ring-white/10">
             <div className="w-6 h-6 rounded-full bg-m-gold flex items-center justify-center text-[10px] font-bold text-m-navy">
